@@ -1,17 +1,19 @@
 import express from "express";
 import dotenv from "dotenv";
-import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+const router = express.Router();
 
 // Load environment variables
 dotenv.config();
 
 // Initialize express
 const app = express();
-app.use(express.json()); // Body parser
 
-// MongoDB User Model
+// Body parser
+app.use(express.json());
+
 const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true },
@@ -19,8 +21,9 @@ const userSchema = new mongoose.Schema(
     role: { type: String, default: "user" }, // 'user' or 'admin'
   },
   { timestamps: true }
-);
+); // Automatically adds `createdAt` and `updatedAt` fields
 
+// Encrypt password before saving
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);
@@ -32,9 +35,8 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-const User = mongoose.model("User", userSchema);
+mongoose.model("User", userSchema);
 
-// MongoDB Product Model
 const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, index: true },
@@ -42,20 +44,20 @@ const productSchema = new mongoose.Schema(
     price: { type: Number, required: true, min: 0 }, // Ensure price is non-negative
   },
   { timestamps: true }
-);
+); // Automatically adds `createdAt` and `updatedAt` fields
 
-const Product = mongoose.model("Product", productSchema);
+export default mongoose.model("Product", productSchema);
 
-// JWT Token Generation
+// Generate JWT Token
 const generateToken = (user) => {
   return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
     expiresIn: "1h",
   });
 };
 
-// Middleware for JWT Protection
-const protect = async (req, res, next) => {
+export async function protect(req, res, next) {
   let token;
+
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer")
@@ -86,10 +88,10 @@ const protect = async (req, res, next) => {
   if (!token) {
     return res.status(401).json({ message: "No token, authorization denied" });
   }
-};
+}
 
-// User Registration
-app.post("/api/auth/register", async (req, res) => {
+// Register a new user
+export async function registerUser(req, res) {
   const { username, password, role } = req.body;
 
   try {
@@ -99,10 +101,10 @@ app.post("/api/auth/register", async (req, res) => {
   } catch (err) {
     res.status(400).json({ message: "Error creating user" });
   }
-});
+}
 
-// User Login
-app.post("/api/auth/login", async (req, res) => {
+// Login user and return token
+export async function loginUser(req, res) {
   const { username, password } = req.body;
 
   try {
@@ -115,20 +117,20 @@ app.post("/api/auth/login", async (req, res) => {
   } catch (err) {
     res.status(400).json({ message: "Error logging in" });
   }
-});
+}
 
 // List all products
-app.get("/api/products", protect, async (req, res) => {
+export async function getProducts(req, res) {
   try {
     const products = await Product.find({});
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
-});
+}
 
 // Add a new product (Admin only)
-app.post("/api/products", protect, async (req, res) => {
+export async function addProduct(req, res) {
   if (req.user.role !== "admin") {
     return res.status(403).json({ message: "Admin access required" });
   }
@@ -140,10 +142,10 @@ app.post("/api/products", protect, async (req, res) => {
   } catch (err) {
     res.status(400).json({ message: "Error creating product" });
   }
-});
+}
 
 // Update product (Admin only)
-app.patch("/api/products/:id", protect, async (req, res) => {
+export async function updateProduct(req, res) {
   if (req.user.role !== "admin") {
     return res.status(403).json({ message: "Admin access required" });
   }
@@ -162,16 +164,25 @@ app.patch("/api/products/:id", protect, async (req, res) => {
   } catch (err) {
     res.status(400).json({ message: "Error updating product" });
   }
-});
+}
 
-// Connect to MongoDB and start server
+router.post("/register", registerUser);
+router.post("/login", loginUser);
+router.get("/", protect, getProducts); // List products
+router.post("/", protect, addProduct); // Add a product (Admin only)
+router.patch("/:id", protect, updateProduct); // Update product (Admin only)
+
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGO_URI);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.log(`Error: ${error.message}`);
-    process.exit(1);
+    process.exit(1); // process code 1 means exit with failure, 0 means success
   }
 };
 
